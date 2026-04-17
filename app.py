@@ -14,7 +14,6 @@ import streamlit.components.v1 as components
 # ==========================================
 # 系統初始化與基本設定
 # ==========================================
-# 💡 長官，您可以在這裡隨時修改您的專屬 App 名稱！
 APP_NAME = "Alpha 戰術雷達"
 
 try:
@@ -23,7 +22,7 @@ try:
 except Exception as e:
     st.set_page_config(page_title=APP_NAME, page_icon="🎯")
 
-# 【iOS PWA 終極駭客注入】：強制寫入蘋果專屬的 App 圖示與名稱
+# 【iOS PWA 終極駭客注入】
 try:
     with open("logo.png", "rb") as f:
         b64_img = base64.b64encode(f.read()).decode("utf-8")
@@ -31,8 +30,6 @@ try:
     components.html(f"""
         <script>
             const doc = window.parent.document;
-            
-            // 強制寫入 Apple App Name
             let metaTitle = doc.querySelector('meta[name="apple-mobile-web-app-title"]');
             if (!metaTitle) {{
                 metaTitle = doc.createElement('meta');
@@ -41,7 +38,6 @@ try:
             }}
             metaTitle.content = "{APP_NAME}";
             
-            // 強制寫入 Apple Touch Icon
             let linkIcon = doc.querySelector('link[rel="apple-touch-icon"]');
             if (!linkIcon) {{
                 linkIcon = doc.createElement('link');
@@ -404,7 +400,7 @@ elif page == "💼 實戰持倉管理":
     st.title("💼 實戰持倉管理")
     
     with st.expander("📝 編輯持倉部位 (點擊展開/收合)", expanded=True):
-        st.caption("輸入成本與股數後，點擊下方按鈕進行全軍健檢。")
+        st.caption("💡 **操作提示**：在手機上輸入完畢後，請先**點擊表格外的空白處**（或按下確認/Enter）讓系統儲存您的輸入，然後再點擊下方按鈕，即可避免需連按兩次的情況。")
         edited_df = st.data_editor(st.session_state.portfolio, num_rows="dynamic", use_container_width=True, key="portfolio_editor")
         st.session_state.portfolio = edited_df
         run_check = st.button("🚀 啟動部位健檢", type="primary", use_container_width=True)
@@ -414,7 +410,19 @@ elif page == "💼 實戰持倉管理":
         my_bar = st.progress(0, text="戰鬥數據結算中...")
         
         for idx, row in edited_df.iterrows():
-            sym, cost, shares = row['代號'].upper(), float(row['持倉成本']), float(row['股數'])
+            
+            # 【防呆裝甲】：自動跳過空行、未填寫或無效代號的列
+            val = row.get('代號')
+            if pd.isna(val) or not val or str(val).strip() == "" or str(val).lower() == "none":
+                continue
+                
+            try:
+                sym = str(row['代號']).upper().strip()
+                cost = float(row.get('持倉成本', 0))
+                shares = float(row.get('股數', 0))
+            except (ValueError, TypeError):
+                continue # 若成本或股數欄位非數字，跳過保護系統
+
             _, m = analyze_stock(sym, st.session_state.weights)
             if isinstance(m, dict):
                 current_val, cost_val = m['price'] * shares, cost * shares

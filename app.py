@@ -5,12 +5,21 @@ import pandas_ta as ta
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+from PIL import Image
+import os
 
 # ==========================================
-# 系統初始化與基本設定
+# 系統初始化與基本設定 (解決 Logo 快取問題)
 # ==========================================
-st.set_page_config(page_title="量化戰情室", page_icon="logo.png")
+try:
+    # 強制讀取圖片檔，繞過瀏覽器路徑快取
+    icon_image = Image.open("logo.png")
+    st.set_page_config(page_title="量化戰情室", page_icon=icon_image)
+except Exception as e:
+    # 如果找不到圖檔，退回預設靶心
+    st.set_page_config(page_title="量化戰情室", page_icon="🎯")
 
+# 全域 CSS 魔法 (包含跑馬燈與卡片美化)
 st.markdown("""
 <style>
     div[data-testid="metric-container"] {
@@ -20,11 +29,47 @@ st.markdown("""
         border-radius: 10px;
         box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
     }
+    
+    /* 華爾街跑馬燈特效 */
+    .ticker-wrap {
+        width: 100%;
+        overflow: hidden;
+        background-color: #1E1E1E;
+        padding-left: 100%;
+        box-sizing: content-box;
+        border-top: 2px solid #333;
+        border-bottom: 2px solid #333;
+        margin-bottom: 15px;
+    }
+    .ticker {
+        display: inline-block;
+        white-space: nowrap;
+        padding-right: 100%;
+        box-sizing: content-box;
+        animation-iteration-count: infinite;
+        animation-timing-function: linear;
+        animation-name: ticker;
+        animation-duration: 30s;
+    }
+    .ticker__item {
+        display: inline-block;
+        padding: 0 2rem;
+        font-size: 16px;
+        color: white;
+        font-weight: 600;
+    }
+    @keyframes ticker {
+        0% { transform: translate3d(0, 0, 0); visibility: visible; }
+        100% { transform: translate3d(-100%, 0, 0); }
+    }
 </style>
 """, unsafe_allow_html=True)
 
+# ==========================================
+# 預設權重鎖定 (依照長官指令配置)
+# ==========================================
 if 'weights' not in st.session_state:
-    st.session_state.weights = {"TA": 25, "SCTR": 20, "Roland": 20, "ETF": 15, "Value": 20}
+    st.session_state.weights = {"TA": 15, "SCTR": 20, "Roland": 35, "ETF": 15, "Value": 15}
 
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = pd.DataFrame([
@@ -170,22 +215,47 @@ if page == "📈 戰情儀表板":
 # ==========================================
 if page == "📈 戰情儀表板":
     
+    # 掃描清單動能，並製作跑馬燈與 Top 5
     if current_symbols and not manual:
-        st.markdown(f"### 🏆 「{selected_list}」Top 5 強勢狙擊榜")
-        with st.spinner("掃描清單動能中..."):
-            top_list = []
+        top_list = []
+        marquee_html = '<div class="ticker-wrap"><div class="ticker">'
+        
+        with st.spinner("掃描清單動能與即時報價中..."):
             for sym in current_symbols:
                 _, m = analyze_stock(sym, st.session_state.weights)
-                if m: top_list.append(m)
-            
-            top_list.sort(key=lambda x: x['final'], reverse=True)
-            top_k = top_list[:5]
-            
-            if top_k:
-                cols = st.columns(len(top_k))
-                for idx, t_m in enumerate(top_k):
-                    with cols[idx]:
-                        st.metric(f"#{idx+1} {t_m['symbol']}", f"{t_m['final']:.1f} 分", f"{t_m['pct_change']:+.2f}%")
+                if m: 
+                    top_list.append(m)
+                    # 組合跑馬燈字串
+                    m_color = "#26A69A" if m['change'] >= 0 else "#EF5350"
+                    m_arrow = "▲" if m['change'] >= 0 else "▼"
+                    marquee_html += f'<div class="ticker__item">{sym} <span style="color:{m_color};">${m["price"]:.2f} ({m_arrow}{abs(m["pct_change"]):.2f}%)</span></div>'
+        
+        marquee_html += '</div></div>'
+        
+        # 顯示超酷炫跑馬燈
+        st.markdown(marquee_html, unsafe_allow_html=True)
+        
+        st.markdown(f"### 🏆 「{selected_list}」Top 5 強勢狙擊榜")
+        
+        top_list.sort(key=lambda x: x['final'], reverse=True)
+        top_k = top_list[:5]
+        
+        if top_k:
+            # 【手機版神級排版】：使用 CSS Grid 取代 st.columns
+            # 確保在手機上呈現 2 欄的滿版方塊，上漲綠底、下跌紅底
+            grid_html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">'
+            for idx, t_m in enumerate(top_k):
+                bg_color = "#26A69A" if t_m['pct_change'] >= 0 else "#EF5350"
+                sign = "+" if t_m['pct_change'] >= 0 else ""
+                grid_html += f"""
+                <div style="background-color: {bg_color}; border-radius: 12px; padding: 15px; color: white; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                    <div style="font-size: 14px; font-weight: 600; opacity: 0.9;">#{idx+1} {t_m['symbol']}</div>
+                    <div style="font-size: 26px; font-weight: 900; margin: 8px 0;">{t_m['final']:.1f}</div>
+                    <div style="font-size: 14px; font-weight: 600;">{sign}{t_m['pct_change']:.2f}%</div>
+                </div>
+                """
+            grid_html += '</div>'
+            st.markdown(grid_html, unsafe_allow_html=True)
         st.markdown("---")
 
     if symbol:
@@ -214,7 +284,6 @@ if page == "📈 戰情儀表板":
             tab_chart, tab_info = st.tabs(["📊 專業走勢圖", "🌟 戰鬥雷達與診斷"])
             
             with tab_chart:
-                # 【解法核心】：用 Streamlit 原生按鈕取代 Plotly 的 Bug 按鈕
                 time_range = st.radio("⏳ 選擇圖表顯示區間 (動態 Y 軸彈性貼齊)", ["1個月", "3個月", "半年", "1年", "全部(2年)"], horizontal=True)
                 
                 if time_range == "1個月": plot_days = 21
@@ -223,11 +292,9 @@ if page == "📈 戰情儀表板":
                 elif time_range == "1年": plot_days = 252
                 else: plot_days = len(data)
                 
-                # 切片：只把選定區間的資料餵給圖表，這樣 Y 軸就會自動彈性貼齊這段期間的高低點！
                 plot_data = data.tail(plot_days)
                 x_dates = plot_data.index
                 
-                # 計算黑名單日期，徹底消除六日與國定假日
                 all_dates = pd.date_range(start=x_dates.min(), end=x_dates.max(), freq='D')
                 missing_dates = all_dates.difference(x_dates).strftime("%Y-%m-%d").tolist()
                 
@@ -253,7 +320,6 @@ if page == "📈 戰情儀表板":
                 fig.add_hline(y=30, line_dash="dash", line_color="#26A69A", line_width=1.5, row=4, col=1) 
                 fig.add_hrect(y0=30, y1=70, fillcolor="purple", opacity=0.1, line_width=0, row=4, col=1)  
                 
-                # 拔除 Plotly 原生 Bug 按鈕，純依賴上方的 Streamlit 按鈕切片，並過濾假日黑名單
                 fig.update_xaxes(rangebreaks=[dict(values=missing_dates)])
                 fig.update_layout(height=650, xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), showlegend=False, hovermode='x unified', hoverlabel=dict(bgcolor="rgba(0,0,0,0.8)", font_size=12))
                 

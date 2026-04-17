@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 # ==========================================
 # 系統初始化與基本設定
 # ==========================================
-st.set_page_config(page_title="量化戰情室", page_icon="🎯")
+st.set_page_config(page_title="量化戰情室", page_icon="logo.png")
 
 st.markdown("""
 <style>

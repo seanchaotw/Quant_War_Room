@@ -7,9 +7,10 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from PIL import Image
 import os
+import time
 
 # ==========================================
-# 系統初始化與基本設定 (解決 Logo 快取問題)
+# 系統初始化與基本設定
 # ==========================================
 try:
     icon_image = Image.open("logo.png")
@@ -17,7 +18,7 @@ try:
 except Exception as e:
     st.set_page_config(page_title="量化戰情室", page_icon="🎯")
 
-# 全域 CSS 魔法
+# 全域 CSS 魔法：加入 3D 翻牌動畫
 st.markdown("""
 <style>
     div[data-testid="metric-container"] {
@@ -28,40 +29,22 @@ st.markdown("""
         box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
     }
     
-    /* 華爾街跑馬燈特效 */
-    .ticker-wrap {
-        width: 100%;
-        overflow: hidden;
-        background-color: #1E1E1E;
-        padding-left: 100%;
-        box-sizing: content-box;
-        border-top: 2px solid #333;
-        border-bottom: 2px solid #333;
-        margin-bottom: 15px;
+    /* 3D 翻牌動畫引擎 */
+    @keyframes flipInY {
+        0% { transform: perspective(400px) rotateY(90deg); opacity: 0; }
+        40% { transform: perspective(400px) rotateY(-10deg); }
+        70% { transform: perspective(400px) rotateY(10deg); }
+        100% { transform: perspective(400px) rotateY(0deg); opacity: 1; }
     }
-    .ticker {
-        display: inline-block;
-        white-space: nowrap;
-        padding-right: 100%;
-        box-sizing: content-box;
-        animation-iteration-count: infinite;
-        animation-timing-function: linear;
-        animation-name: ticker;
-        animation-duration: 30s;
-    }
-    .ticker__item {
-        display: inline-block;
-        padding: 0 2rem;
-        font-size: 16px;
-        color: white;
-        font-weight: 600;
-    }
-    @keyframes ticker {
-        0% { transform: translate3d(0, 0, 0); visibility: visible; }
-        100% { transform: translate3d(-100%, 0, 0); }
+    .flip-card {
+        animation: flipInY 0.7s ease-out both; 
     }
 </style>
 """, unsafe_allow_html=True)
+
+# 定義美股「護眼沉穩」紅綠色
+US_GREEN = "#2E7D32"  
+US_RED = "#C62828"    
 
 # ==========================================
 # 預設權重鎖定
@@ -144,12 +127,36 @@ def analyze_stock(symbol, w):
         st_sc = last['RSI'] * 0.10 + norm(last['MACDh_12_26_9'] - prev['MACDh_12_26_9'], -0.5, 0.5) * 0.15
         sctr_score = round((lt + mt + st_sc) / 10, 1)
 
+        # ---------------------------------------------------------
+        # 【優化區塊 1】：機構籌碼細節抓取
+        # ---------------------------------------------------------
         try: inst_pct = float(ticker.major_holders.iloc[1, 0]) * 100 if ticker.major_holders is not None else 50.0
         except: inst_pct = 50.0
+        
+        inst_list = []
+        try:
+            inst_df = ticker.institutional_holders
+            if inst_df is not None and not inst_df.empty and 'Holder' in inst_df.columns:
+                for _, r in inst_df.head(3).iterrows():
+                    h_name = r['Holder']
+                    h_pct = r.get('pctHeld', 0) * 100
+                    inst_list.append(f"{h_name} ({h_pct:.2f}%)")
+        except Exception as e:
+            pass # 抓不到就保持空清單
+
         etf_score = 9 if inst_pct > 80 else (7 if inst_pct > 50 else (3 if inst_pct < 20 else 5))
 
+        # ---------------------------------------------------------
+        # 【優化區塊 2】：估值防線與高低目標價
+        # ---------------------------------------------------------
         tgt = info.get('targetMeanPrice', curr_price)
-        peg = info.get('pegRatio', 0)
+        tgt_high = info.get('targetHighPrice', 0)
+        tgt_low = info.get('targetLowPrice', 0)
+        
+        # 雙重PEG防線，若無則抓取本益比(P/E)作為備案
+        peg = info.get('pegRatio') or info.get('trailingPegRatio') or 0
+        pe = info.get('trailingPE') or info.get('forwardPE') or 0
+        
         upside = ((tgt - curr_price) / curr_price) * 100 if tgt else 0
         tgt_score = 10 if upside > 15 else (7 if upside > 0 else (4 if upside > -10 else 1))
         peg_score = 10 if peg and 0 < peg <= 1.0 else (7 if peg and peg <= 1.5 else (4 if peg and peg <= 2.0 else 1))
@@ -169,7 +176,9 @@ def analyze_stock(symbol, w):
             "ema200": last['EMA200'], "ema50": last['EMA50'],
             "ta": ta_score, "roland": roland_score, "sctr": sctr_score, 
             "etf": etf_score, "val": val_score, "final": final_score,
-            "dg": dg, "gg": gg, "inst_pct": inst_pct, "upside": upside, "target": tgt, "peg": peg
+            "dg": dg, "gg": gg, "inst_pct": inst_pct, "inst_list": inst_list, 
+            "upside": upside, "target": tgt, "tgt_high": tgt_high, "tgt_low": tgt_low, 
+            "peg": peg, "pe": pe
         }
         return data, metrics
     except Exception as e:
@@ -203,7 +212,7 @@ if page == "📈 戰情儀表板":
         st.sidebar.warning("此清單目前為空，請加入股票。")
         symbol = ""
     else:
-        symbol = st.sidebar.selectbox("選擇要掃描的個股 (下方戰情室)", current_symbols)
+        symbol = st.sidebar.selectbox("選擇要掃描的個股", current_symbols)
 
     manual = st.sidebar.text_input("或直接手動輸入單檔代號").upper()
     if manual: symbol = manual
@@ -214,65 +223,69 @@ if page == "📈 戰情儀表板":
 if page == "📈 戰情儀表板":
     
     if current_symbols and not manual:
+        st.markdown(f"### 🏆 「{selected_list}」Top 5 強勢狙擊榜")
         top_list = []
-        marquee_html = '<div class="ticker-wrap"><div class="ticker">'
         
-        with st.spinner("掃描清單動能與即時報價中..."):
+        with st.spinner("掃描清單動能中 (啟動防封鎖降速掃描)..."):
             for sym in current_symbols:
                 _, m = analyze_stock(sym, st.session_state.weights)
                 if isinstance(m, dict): 
                     top_list.append(m)
-                    m_color = "#26A69A" if m['change'] >= 0 else "#EF5350"
-                    m_arrow = "▲" if m['change'] >= 0 else "▼"
-                    marquee_html += f'<div class="ticker__item">{sym} <span style="color:{m_color};">${m["price"]:.2f} ({m_arrow}{abs(m["pct_change"]):.2f}%)</span></div>'
-        
-        marquee_html += '</div></div>'
-        st.markdown(marquee_html, unsafe_allow_html=True)
-        
-        st.markdown(f"### 🏆 「{selected_list}」Top 5 強勢狙擊榜")
+                time.sleep(0.8) 
         
         top_list.sort(key=lambda x: x['final'], reverse=True)
         top_k = top_list[:5]
         
         if top_k:
-            grid_html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">'
+            grid_html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-bottom: 15px;">'
+            medals = ["🥇", "🥈", "🥉", "🏅", "🏅"]
+            
             for idx, t_m in enumerate(top_k):
-                bg_color = "#26A69A" if t_m['pct_change'] >= 0 else "#EF5350"
+                bg_color = US_GREEN if t_m['pct_change'] >= 0 else US_RED
                 sign = "+" if t_m['pct_change'] >= 0 else ""
-                grid_html += f"""
-                <div style="background-color: {bg_color}; border-radius: 12px; padding: 15px; color: white; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
-                    <div style="font-size: 14px; font-weight: 600; opacity: 0.9;">#{idx+1} {t_m['symbol']}</div>
-                    <div style="font-size: 26px; font-weight: 900; margin: 8px 0;">{t_m['final']:.1f}</div>
-                    <div style="font-size: 14px; font-weight: 600;">{sign}{t_m['pct_change']:.2f}%</div>
-                </div>
-                """
+                medal = medals[idx] if idx < 5 else "🏅"
+                fire_icon = "🔥" if t_m['final'] >= 8 else ""
+                
+                if t_m['final'] >= 8: action_text = "🚀 強烈買入"
+                elif t_m['final'] >= 6: action_text = "🟢 偏多操作"
+                elif t_m['final'] <= 4: action_text = "💀 弱勢撤退"
+                else: action_text = "👀 續抱觀望"
+                
+                delay = idx * 0.15
+                box_html = f'<div class="flip-card" style="animation-delay: {delay}s; background-color: {bg_color}; border-radius: 10px; padding: 10px; color: white; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);"><div style="font-size: 13px; font-weight: 600; opacity: 0.9;">{medal} {t_m["symbol"]}</div><div style="font-size: 22px; font-weight: 900; margin: 4px 0;">{t_m["final"]:.1f} {fire_icon}</div><div style="font-size: 11px; font-weight: bold; background: rgba(0,0,0,0.25); padding: 3px; border-radius: 4px; margin-bottom: 6px;">{action_text}</div><div style="font-size: 13px; font-weight: 600;">{sign}{t_m["pct_change"]:.2f}%</div></div>'
+                
+                grid_html += box_html
+            
             grid_html += '</div>'
             st.markdown(grid_html, unsafe_allow_html=True)
+            
+            st.caption("💡 **戰術總分指南**：`8分以上` 🚀強烈買入 ｜ `6~8分` 🟢偏多操作 ｜ `4~6分` 👀續抱觀望 ｜ `4分以下` 💀弱勢撤退")
+            
         st.markdown("---")
 
     if symbol:
-        with st.spinner("雷達掃描中..."):
+        with st.spinner(f"雷達鎖定 {symbol} 中..."):
             data, m = analyze_stock(symbol, st.session_state.weights)
         
         if data is None:
             st.error(f"無法取得 {symbol} 數據。")
-            # 這裡就是關鍵的除錯雷達！它會把真正的死因印出來
             st.warning(f"⚠️ 除錯雷達攔截原因：{m}")
         else:
             st.markdown(f"## 🎯 {symbol} | {m['name']}")
             
-            color = "#26A69A" if m['change'] >= 0 else "#EF5350"
+            color = US_GREEN if m['change'] >= 0 else US_RED
             arrow = "▲" if m['change'] >= 0 else "▼"
-            html_metrics = f"""
-            <div style="display:flex; flex-wrap: wrap; gap: 10px; justify-content:space-around; text-align:center; padding: 15px; background-color: rgba(128,128,128,0.05); border-radius: 8px; margin-bottom: 20px; box-shadow: 2px 2px 8px rgba(0,0,0,0.1);">
-                <div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">💰 收盤價</div><b style="font-size:18px;">${m['price']:.2f}</b><br><span style="color:{color}; font-size:12px; font-weight:bold;">{arrow} {abs(m['change']):.2f} ({m['pct_change']:+.2f}%)</span></div>
-                <div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">⏱️ 開盤</div><b style="font-size:16px;">${m['open']:.2f}</b></div>
-                <div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">📈 最高</div><b style="font-size:16px;">${m['high']:.2f}</b></div>
-                <div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">📉 最低</div><b style="font-size:16px;">${m['low']:.2f}</b></div>
-                <div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">🌊 振幅</div><b style="font-size:16px;">{m['amplitude']:.2f}%</b></div>
-                <div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">🏷️ 市值規模</div><b style="font-size:14px;">{m['cap_size']}</b></div>
-            </div>
-            """
+            
+            html_metrics = (
+                f'<div style="display:flex; flex-wrap: wrap; gap: 10px; justify-content:space-around; text-align:center; padding: 12px; background-color: rgba(128,128,128,0.05); border-radius: 8px; margin-bottom: 20px; box-shadow: 2px 2px 8px rgba(0,0,0,0.1);">'
+                f'<div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">💰 收盤價</div><b style="font-size:18px;">${m["price"]:.2f}</b><br><span style="color:{color}; font-size:12px; font-weight:bold;">{arrow} {abs(m["change"]):.2f} ({m["pct_change"]:+.2f}%)</span></div>'
+                f'<div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">⏱️ 開盤</div><b style="font-size:16px;">${m["open"]:.2f}</b></div>'
+                f'<div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">📈 最高</div><b style="font-size:16px;">${m["high"]:.2f}</b></div>'
+                f'<div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">📉 最低</div><b style="font-size:16px;">${m["low"]:.2f}</b></div>'
+                f'<div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">🌊 振幅</div><b style="font-size:16px;">{m["amplitude"]:.2f}%</b></div>'
+                f'<div style="min-width: 80px;"><div style="color:gray; font-size:12px; margin-bottom:4px;">🏷️ 市值規模</div><b style="font-size:14px;">{m["cap_size"]}</b></div>'
+                f'</div>'
+            )
             st.markdown(html_metrics, unsafe_allow_html=True)
 
             tab_chart, tab_info = st.tabs(["📊 專業走勢圖", "🌟 戰鬥雷達與診斷"])
@@ -294,10 +307,10 @@ if page == "📈 戰情儀表板":
                 
                 fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.5, 0.15, 0.15, 0.2])
                 
-                vol_colors = ['#EF5350' if row['Close'] < row['Open'] else '#26A69A' for index, row in plot_data.iterrows()]
-                macd_colors = ['#26A69A' if val >= 0 else '#EF5350' for val in plot_data['MACDh_12_26_9']]
+                vol_colors = [US_RED if row['Close'] < row['Open'] else US_GREEN for index, row in plot_data.iterrows()]
+                macd_colors = [US_GREEN if val >= 0 else US_RED for val in plot_data['MACDh_12_26_9']]
                 
-                fig.add_trace(go.Candlestick(x=x_dates, open=plot_data['Open'], high=plot_data['High'], low=plot_data['Low'], close=plot_data['Close'], name='股價', increasing_line_color='#26A69A', decreasing_line_color='#EF5350'), row=1, col=1)
+                fig.add_trace(go.Candlestick(x=x_dates, open=plot_data['Open'], high=plot_data['High'], low=plot_data['Low'], close=plot_data['Close'], name='股價', increasing_line_color=US_GREEN, decreasing_line_color=US_RED), row=1, col=1)
                 fig.add_trace(go.Scatter(x=x_dates, y=plot_data['EMA200'], line=dict(color='gray', width=2, dash='dot'), name='EMA200'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=x_dates, y=plot_data['MA3'], line=dict(color='#FFCA28', width=2), name='MA3'), row=1, col=1)
                 
@@ -309,9 +322,9 @@ if page == "📈 戰情儀表板":
                 fig.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)", line_width=1, row=3, col=1) 
                 
                 fig.add_trace(go.Scatter(x=x_dates, y=plot_data['RSI'], line=dict(color='#E040FB', width=1.5), name='RSI(14)'), row=4, col=1)
-                fig.add_hline(y=70, line_dash="dash", line_color="#EF5350", line_width=1.5, row=4, col=1) 
+                fig.add_hline(y=70, line_dash="dash", line_color=US_RED, line_width=1.5, row=4, col=1) 
                 fig.add_hline(y=50, line_dash="dot", line_color="rgba(255,255,255,0.3)", line_width=1, row=4, col=1)   
-                fig.add_hline(y=30, line_dash="dash", line_color="#26A69A", line_width=1.5, row=4, col=1) 
+                fig.add_hline(y=30, line_dash="dash", line_color=US_GREEN, line_width=1.5, row=4, col=1) 
                 fig.add_hrect(y0=30, y1=70, fillcolor="purple", opacity=0.1, line_width=0, row=4, col=1)  
                 
                 fig.update_xaxes(rangebreaks=[dict(values=missing_dates)])
@@ -319,6 +332,9 @@ if page == "📈 戰情儀表板":
                 
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
 
+            # ---------------------------------------------------------
+            # 【 UI 顯示優化：機構名單與估值詳細資訊】
+            # ---------------------------------------------------------
             with tab_info:
                 st.metric(label="綜合得分 (滿分10)", value=f"{m['final']:.2f}")
                 if m['final'] >= 8: st.success("🚨 【強烈買入】共振訊號發動！")
@@ -340,11 +356,22 @@ if page == "📈 戰情儀表板":
                     st.caption(f"• 中線 (EMA50): ${m['ema50']:.2f}")
 
                 with st.expander(f"4️⃣ ETF 籌碼: {m['etf']} / 10"):
-                    st.caption(f"• 機構持股比例: {m['inst_pct']:.1f}%")
+                    st.caption(f"• 總機構持股比例: {m['inst_pct']:.1f}%")
+                    if m['inst_list']:
+                        st.markdown("**🏦 前三大持股機構 (最新一季)：**")
+                        for inst in m['inst_list']:
+                            st.caption(f"  - {inst}")
+                    st.caption("*(💡 備註：依 SEC 法規，華爾街機構籌碼 (13F) 僅有「季報」，無法取得即時週變動。)*")
 
                 with st.expander(f"5️⃣ 公允估值: {m['val']} / 10"):
-                    st.caption(f"• 華爾街目標價: ${m['target']:.2f} ({m['upside']:+.1f}%)")
-                    st.caption(f"• PEG 成長比: {m['peg']:.2f}" if m['peg'] else "• PEG 成長比: 無資料")
+                    st.caption(f"• 華爾街平均目標價: ${m['target']:.2f} ({m['upside']:+.1f}%)")
+                    if m['tgt_high'] > 0 and m['tgt_low'] > 0:
+                        st.caption(f"  - 📈 最高看至: ${m['tgt_high']:.2f} ｜ 📉 最低看至: ${m['tgt_low']:.2f}")
+                    
+                    if m['peg'] > 0:
+                        st.caption(f"• PEG 成長比: {m['peg']:.2f}")
+                    else:
+                        st.caption(f"• PEG 成長比: 無資料 (備用估值 P/E 本益比: {m['pe']:.2f})")
 
 # ==========================================
 # 頁面 2: 實戰持倉管理 
@@ -380,6 +407,7 @@ elif page == "💼 實戰持倉管理":
                     "戰術得分": round(m['final'], 1), 
                     "系統建議": action
                 })
+            time.sleep(0.8)
             my_bar.progress((idx + 1) / len(edited_df))
         my_bar.empty()
 
@@ -400,7 +428,7 @@ elif page == "💼 實戰持倉管理":
                 st.caption("💡 點擊方塊可查看詳細數據。太小的方塊會自動隱藏文字以保持整潔。")
                 fig_tree = px.treemap(
                     res_df, path=['系統建議', '股票代號'], values='當前總值', color='戰術得分', 
-                    color_continuous_scale=['#EF5350', '#FFCA28', '#26A69A'], color_continuous_midpoint=5.5, 
+                    color_continuous_scale=[US_RED, '#FFCA28', US_GREEN], color_continuous_midpoint=5.5, 
                     custom_data=['得分顯示', '未實現損益顯示']
                 )
                 fig_tree.update_layout(
@@ -455,4 +483,4 @@ elif page == "⚙️ 權重設定":
     w["ETF"] = st.slider("4. ETF 籌碼比例", 0, 100, w["ETF"])
     w["Value"] = st.slider("5. 綜合公允估值", 0, 100, w["Value"])
     st.session_state.weights = w
-    if sum(w.values()) != 100: st.warning("⚠️ 總權重需等於 100%")
+    if sum(w.values()) != 100: st.warning("⚠️ 總權重需等於 100%")   

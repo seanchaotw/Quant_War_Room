@@ -175,7 +175,8 @@ def analyze_stock(symbol, w):
         }
         return data, metrics
     except Exception as e:
-        return None, None
+        # 把原本的 return None, None 改成把錯誤訊息傳出來
+        return None, f"系統底層錯誤: {str(e)}"
 
 # ==========================================
 # 側邊欄
@@ -258,12 +259,13 @@ if page == "📈 戰情儀表板":
             st.markdown(grid_html, unsafe_allow_html=True)
         st.markdown("---")
 
-    if symbol:
+   if symbol:
         with st.spinner("雷達掃描中..."):
             data, m = analyze_stock(symbol, st.session_state.weights)
         
         if data is None:
             st.error(f"無法取得 {symbol} 數據。")
+            st.warning(f"⚠️ 除錯雷達攔截原因：{m}")  # <--- 新增這行，印出真正死因
         else:
             st.markdown(f"## 🎯 {symbol} | {m['name']}")
             

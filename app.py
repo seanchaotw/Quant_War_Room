@@ -8,17 +8,53 @@ from plotly.subplots import make_subplots
 from PIL import Image
 import os
 import time
+import base64
+import streamlit.components.v1 as components
 
 # ==========================================
 # 系統初始化與基本設定
 # ==========================================
+# 💡 長官，您可以在這裡隨時修改您的專屬 App 名稱！
+APP_NAME = "Alpha 戰術雷達"
+
 try:
     icon_image = Image.open("logo.png")
-    st.set_page_config(page_title="量化戰情室", page_icon=icon_image)
+    st.set_page_config(page_title=APP_NAME, page_icon=icon_image)
 except Exception as e:
-    st.set_page_config(page_title="量化戰情室", page_icon="🎯")
+    st.set_page_config(page_title=APP_NAME, page_icon="🎯")
 
-# 全域 CSS 魔法：加入 3D 翻牌動畫
+# 【iOS PWA 終極駭客注入】：強制寫入蘋果專屬的 App 圖示與名稱
+try:
+    with open("logo.png", "rb") as f:
+        b64_img = base64.b64encode(f.read()).decode("utf-8")
+    
+    components.html(f"""
+        <script>
+            const doc = window.parent.document;
+            
+            // 強制寫入 Apple App Name
+            let metaTitle = doc.querySelector('meta[name="apple-mobile-web-app-title"]');
+            if (!metaTitle) {{
+                metaTitle = doc.createElement('meta');
+                metaTitle.name = 'apple-mobile-web-app-title';
+                doc.head.appendChild(metaTitle);
+            }}
+            metaTitle.content = "{APP_NAME}";
+            
+            // 強制寫入 Apple Touch Icon
+            let linkIcon = doc.querySelector('link[rel="apple-touch-icon"]');
+            if (!linkIcon) {{
+                linkIcon = doc.createElement('link');
+                linkIcon.rel = 'apple-touch-icon';
+                doc.head.appendChild(linkIcon);
+            }}
+            linkIcon.href = "data:image/png;base64,{b64_img}";
+        </script>
+    """, height=0, width=0)
+except Exception as e:
+    pass
+
+# 全域 CSS 魔法
 st.markdown("""
 <style>
     div[data-testid="metric-container"] {
@@ -29,7 +65,6 @@ st.markdown("""
         box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
     }
     
-    /* 3D 翻牌動畫引擎 */
     @keyframes flipInY {
         0% { transform: perspective(400px) rotateY(90deg); opacity: 0; }
         40% { transform: perspective(400px) rotateY(-10deg); }
@@ -42,7 +77,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 定義美股「護眼沉穩」紅綠色
 US_GREEN = "#2E7D32"  
 US_RED = "#C62828"    
 
@@ -127,9 +161,6 @@ def analyze_stock(symbol, w):
         st_sc = last['RSI'] * 0.10 + norm(last['MACDh_12_26_9'] - prev['MACDh_12_26_9'], -0.5, 0.5) * 0.15
         sctr_score = round((lt + mt + st_sc) / 10, 1)
 
-        # ---------------------------------------------------------
-        # 【優化區塊 1】：機構籌碼細節抓取
-        # ---------------------------------------------------------
         try: inst_pct = float(ticker.major_holders.iloc[1, 0]) * 100 if ticker.major_holders is not None else 50.0
         except: inst_pct = 50.0
         
@@ -142,18 +173,14 @@ def analyze_stock(symbol, w):
                     h_pct = r.get('pctHeld', 0) * 100
                     inst_list.append(f"{h_name} ({h_pct:.2f}%)")
         except Exception as e:
-            pass # 抓不到就保持空清單
+            pass 
 
         etf_score = 9 if inst_pct > 80 else (7 if inst_pct > 50 else (3 if inst_pct < 20 else 5))
 
-        # ---------------------------------------------------------
-        # 【優化區塊 2】：估值防線與高低目標價
-        # ---------------------------------------------------------
         tgt = info.get('targetMeanPrice', curr_price)
         tgt_high = info.get('targetHighPrice', 0)
         tgt_low = info.get('targetLowPrice', 0)
         
-        # 雙重PEG防線，若無則抓取本益比(P/E)作為備案
         peg = info.get('pegRatio') or info.get('trailingPegRatio') or 0
         pe = info.get('trailingPE') or info.get('forwardPE') or 0
         
@@ -332,9 +359,6 @@ if page == "📈 戰情儀表板":
                 
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
 
-            # ---------------------------------------------------------
-            # 【 UI 顯示優化：機構名單與估值詳細資訊】
-            # ---------------------------------------------------------
             with tab_info:
                 st.metric(label="綜合得分 (滿分10)", value=f"{m['final']:.2f}")
                 if m['final'] >= 8: st.success("🚨 【強烈買入】共振訊號發動！")
@@ -462,7 +486,7 @@ elif page == "💼 實戰持倉管理":
 # 頁面 3 & 4: 手冊與設定
 # ==========================================
 elif page == "📖 戰術手冊":
-    st.title("📖 量化戰情室：指標戰術手冊")
+    st.title(f"📖 {APP_NAME}：指標戰術手冊")
     st.markdown("### 1. 技術軍師 (TA)")
     st.info("**評分邏輯：** 綜合 MA20 均線趨勢、RSI 動能、MACD 交叉與成交量放大。四項條件各佔 2.5 分。\n\n**實戰意義：** 確認目前市場是處於多頭發動還是空頭深淵。")
     st.markdown("### 2. Roland Index (反轉拐點)")
@@ -483,4 +507,4 @@ elif page == "⚙️ 權重設定":
     w["ETF"] = st.slider("4. ETF 籌碼比例", 0, 100, w["ETF"])
     w["Value"] = st.slider("5. 綜合公允估值", 0, 100, w["Value"])
     st.session_state.weights = w
-    if sum(w.values()) != 100: st.warning("⚠️ 總權重需等於 100%")   
+    if sum(w.values()) != 100: st.warning("⚠️ 總權重需等於 100%")

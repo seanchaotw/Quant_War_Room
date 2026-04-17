@@ -12,14 +12,12 @@ import os
 # 系統初始化與基本設定 (解決 Logo 快取問題)
 # ==========================================
 try:
-    # 強制讀取圖片檔，繞過瀏覽器路徑快取
     icon_image = Image.open("logo.png")
     st.set_page_config(page_title="量化戰情室", page_icon=icon_image)
 except Exception as e:
-    # 如果找不到圖檔，退回預設靶心
     st.set_page_config(page_title="量化戰情室", page_icon="🎯")
 
-# 全域 CSS 魔法 (包含跑馬燈與卡片美化)
+# 全域 CSS 魔法
 st.markdown("""
 <style>
     div[data-testid="metric-container"] {
@@ -66,7 +64,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 預設權重鎖定 (依照長官指令配置)
+# 預設權重鎖定
 # ==========================================
 if 'weights' not in st.session_state:
     st.session_state.weights = {"TA": 15, "SCTR": 20, "Roland": 35, "ETF": 15, "Value": 15}
@@ -93,7 +91,7 @@ def analyze_stock(symbol, w):
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="2y")
-        if data.empty: return None, None
+        if data.empty: return None, "Yahoo Finance 回傳空資料，可能是代號錯誤或遭到阻擋。"
         if data.index.tz is not None: data.index = data.index.tz_localize(None)
 
         info = ticker.info
@@ -115,7 +113,7 @@ def analyze_stock(symbol, w):
         data['ROC20'] = ta.roc(data['Close'], length=20)
         macd = ta.macd(data['Close'])
         data = pd.concat([data, macd], axis=1).dropna()
-        if data.empty: return None, None
+        if data.empty: return None, "技術指標計算後資料為空。"
 
         last = data.iloc[-1]
         prev = data.iloc[-2]
@@ -175,8 +173,7 @@ def analyze_stock(symbol, w):
         }
         return data, metrics
     except Exception as e:
-        # 把原本的 return None, None 改成把錯誤訊息傳出來
-        return None, f"系統底層錯誤: {str(e)}"
+        return None, f"系統底層錯誤或連線被阻擋: {str(e)}"
 
 # ==========================================
 # 側邊欄
@@ -216,7 +213,6 @@ if page == "📈 戰情儀表板":
 # ==========================================
 if page == "📈 戰情儀表板":
     
-    # 掃描清單動能，並製作跑馬燈與 Top 5
     if current_symbols and not manual:
         top_list = []
         marquee_html = '<div class="ticker-wrap"><div class="ticker">'
@@ -224,16 +220,13 @@ if page == "📈 戰情儀表板":
         with st.spinner("掃描清單動能與即時報價中..."):
             for sym in current_symbols:
                 _, m = analyze_stock(sym, st.session_state.weights)
-                if m: 
+                if isinstance(m, dict): 
                     top_list.append(m)
-                    # 組合跑馬燈字串
                     m_color = "#26A69A" if m['change'] >= 0 else "#EF5350"
                     m_arrow = "▲" if m['change'] >= 0 else "▼"
                     marquee_html += f'<div class="ticker__item">{sym} <span style="color:{m_color};">${m["price"]:.2f} ({m_arrow}{abs(m["pct_change"]):.2f}%)</span></div>'
         
         marquee_html += '</div></div>'
-        
-        # 顯示超酷炫跑馬燈
         st.markdown(marquee_html, unsafe_allow_html=True)
         
         st.markdown(f"### 🏆 「{selected_list}」Top 5 強勢狙擊榜")
@@ -242,8 +235,6 @@ if page == "📈 戰情儀表板":
         top_k = top_list[:5]
         
         if top_k:
-            # 【手機版神級排版】：使用 CSS Grid 取代 st.columns
-            # 確保在手機上呈現 2 欄的滿版方塊，上漲綠底、下跌紅底
             grid_html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">'
             for idx, t_m in enumerate(top_k):
                 bg_color = "#26A69A" if t_m['pct_change'] >= 0 else "#EF5350"
@@ -259,13 +250,14 @@ if page == "📈 戰情儀表板":
             st.markdown(grid_html, unsafe_allow_html=True)
         st.markdown("---")
 
-   if symbol:
+    if symbol:
         with st.spinner("雷達掃描中..."):
             data, m = analyze_stock(symbol, st.session_state.weights)
         
         if data is None:
             st.error(f"無法取得 {symbol} 數據。")
-            st.warning(f"⚠️ 除錯雷達攔截原因：{m}")  # <--- 新增這行，印出真正死因
+            # 這裡就是關鍵的除錯雷達！它會把真正的死因印出來
+            st.warning(f"⚠️ 除錯雷達攔截原因：{m}")
         else:
             st.markdown(f"## 🎯 {symbol} | {m['name']}")
             
@@ -373,7 +365,7 @@ elif page == "💼 實戰持倉管理":
         for idx, row in edited_df.iterrows():
             sym, cost, shares = row['代號'].upper(), float(row['持倉成本']), float(row['股數'])
             _, m = analyze_stock(sym, st.session_state.weights)
-            if m:
+            if isinstance(m, dict):
                 current_val, cost_val = m['price'] * shares, cost * shares
                 pnl = current_val - cost_val
                 pnl_pct = (pnl / cost_val) * 100 if cost_val > 0 else 0

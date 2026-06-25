@@ -8,6 +8,8 @@ from PIL import Image
 import base64
 import streamlit.components.v1 as components
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ==========================================
 # 系統初始化與基本設定
@@ -49,8 +51,16 @@ if 'weights' not in st.session_state:
 def analyze_stock(symbol, w):
     try:
         session = requests.Session()
+        retry = Retry(connect=3, backoff_factor=0.5) 
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+        
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive"
         })
         ticker = yf.Ticker(symbol, session=session)
         data = ticker.history(period="2y")

@@ -5,8 +5,6 @@ import pandas_ta as ta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from PIL import Image
-import base64
-import streamlit.components.v1 as components
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -50,6 +48,7 @@ if 'weights' not in st.session_state:
 @st.cache_data(ttl=300) 
 def analyze_stock(symbol, w):
     try:
+        # === 終極防護盾：重試機制 + 完整瀏覽器偽裝 ===
         session = requests.Session()
         retry = Retry(connect=3, backoff_factor=0.5) 
         adapter = HTTPAdapter(max_retries=retry)
@@ -57,13 +56,15 @@ def analyze_stock(symbol, w):
         session.mount('https://', adapter)
         
         session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        "Accept": "*/*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive"
         })
+        
         ticker = yf.Ticker(symbol, session=session)
         data = ticker.history(period="2y")
+        
         if data.empty: return None, "Yahoo Finance 回傳空資料，可能是代號錯誤或遭到阻擋。"
         if data.index.tz is not None: data.index = data.index.tz_localize(None)
 

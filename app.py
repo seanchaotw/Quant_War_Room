@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 from PIL import Image
 import base64
 import streamlit.components.v1 as components
+import requests
 
 # ==========================================
 # 系統初始化與基本設定
@@ -47,7 +48,11 @@ if 'weights' not in st.session_state:
 @st.cache_data(ttl=300) 
 def analyze_stock(symbol, w):
     try:
-        ticker = yf.Ticker(symbol)
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        ticker = yf.Ticker(symbol, session=session)
         data = ticker.history(period="2y")
         if data.empty: return None, "Yahoo Finance 回傳空資料，可能是代號錯誤或遭到阻擋。"
         if data.index.tz is not None: data.index = data.index.tz_localize(None)
